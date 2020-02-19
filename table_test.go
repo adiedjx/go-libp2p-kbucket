@@ -446,3 +446,60 @@ func BenchmarkFinds(b *testing.B) {
 		tab.Find(peers[i])
 	}
 }
+
+
+type metrics struct {
+	lat map[peer.ID]time.Duration
+}
+
+func (m metrics) RecordLatency(peer peer.ID,times time.Duration) {
+	//panic("implement me")
+	m.lat[peer]=time.Millisecond
+}
+
+func (m metrics) LatencyEWMA(id peer.ID) time.Duration {
+
+	if _, ok:=m.lat[id];!ok{
+		m.lat[id]=time.Duration(rand.Int31n(1000))*time.Millisecond
+	}
+	return m.lat[id]
+}
+
+func NewMetrics() *metrics {
+	return &metrics{
+		make(map[peer.ID]time.Duration),
+	}
+}
+
+func TestTableUpdate2(t *testing.T) {
+	t.Parallel()
+
+	local := test.RandPeerIDFatal(t)
+	m := NewMetrics()
+	rt := NewRoutingTable(3, ConvertPeerID(local), time.Hour, m)
+
+	peers := make([]peer.ID, 100)
+	for i := 0; i < 100; i++ {
+		peers[i] = test.RandPeerIDFatal(t)
+	}
+
+	// Testing Update
+	//for i := 0; i < 10000; i++ {
+	//	rt.Update(peers[rand.Intn(len(peers))])
+	//}
+
+	// Testing Update
+	for i := 0; i < 100; i++ {
+		rt.Update(peers[i])
+	}
+	rt.Print()
+
+	for i := 0; i < 100; i++ {
+		id := ConvertPeerID(test.RandPeerIDFatal(t))
+		ret := rt.NearestPeers(id, 5)
+		if len(ret) == 0 {
+			t.Fatal("Failed to find node near ID.")
+		}
+	}
+}
+
