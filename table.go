@@ -139,13 +139,14 @@ func (rt *RoutingTable) Update(p peer.ID) (evicted peer.ID, err error) {
 	if bucketID >= len(rt.Buckets) {
 		bucketID = len(rt.Buckets) - 1
 	}
+	latency := rt.metrics.LatencyEWMA(p)
 
 	bucket := rt.Buckets[bucketID]
 	if bucket.Has(p) {
-		// If the peer is already in the table, move it to the front.
-		// This signifies that it it "more active" and the less active nodes
-		// Will as a result tend towards the back of the list
-		bucket.MoveToFront(p)
+
+		//TODO,
+		//in future can check its latency again and move it to its respective position
+		//bucket.PushFrontWithLatency(p, latency)
 		return "", nil
 	}
 
@@ -154,9 +155,9 @@ func (rt *RoutingTable) Update(p peer.ID) (evicted peer.ID, err error) {
 		return "", ErrPeerRejectedHighLatency
 	}
 
-	// We have enough space in the bucket (whether spawned or grouped).
-	if bucket.Len() < rt.bucketsize {
-		bucket.PushFront(p)
+	// We have enough space in the bucket (whether s pawned or grouped).
+	if bucket.list.Len() < rt.bucketsize {
+		bucket.PushFrontWithLatency(p, latency)
 		rt.PeerAdded(p)
 		return "", nil
 	}
@@ -174,7 +175,7 @@ func (rt *RoutingTable) Update(p peer.ID) (evicted peer.ID, err error) {
 			// if after all the unfolding, we're unable to find room for this peer, scrap it.
 			return "", ErrPeerRejectedNoCapacity
 		}
-		bucket.PushFront(p)
+		bucket.PushFrontWithLatency(p, latency)
 		rt.PeerAdded(p)
 		return "", nil
 	}
@@ -334,7 +335,7 @@ func (rt *RoutingTable) Print() {
 
 		b.lk.RLock()
 		for e := b.list.Front(); e != nil; e = e.Next() {
-			p := e.Value.(peer.ID)
+			p := e.Value.(PeerIDLatency).ID
 			fmt.Printf("\t\t- %s %s\n", p.Pretty(), rt.metrics.LatencyEWMA(p).String())
 		}
 		b.lk.RUnlock()
