@@ -56,10 +56,21 @@ type RoutingTable struct {
 	// notification functions
 	PeerRemoved func(peer.ID)
 	PeerAdded   func(peer.ID)
+
+	LatencyMod bool
+}
+type Options func(rt *RoutingTable)
+
+func LatencyMod() Options {
+	return func(rt *RoutingTable) {
+		rt.LatencyMod = true
+	}
 }
 
 // NewRoutingTable creates a new routing table with a given bucketsize, local ID, and latency tolerance.
-func NewRoutingTable(bucketsize int, localID ID, latency time.Duration, m peerstore.Metrics) *RoutingTable {
+func NewRoutingTable(bucketsize int, localID ID, latency time.Duration, m peerstore.Metrics, options ...Options) *RoutingTable {
+	println("--------------LATENCY MOD------------------------")
+
 	rt := &RoutingTable{
 		Buckets:        []*Bucket{newBucket()},
 		bucketsize:     bucketsize,
@@ -71,6 +82,9 @@ func NewRoutingTable(bucketsize int, localID ID, latency time.Duration, m peerst
 		PeerAdded:      func(peer.ID) {},
 	}
 
+	for _, op := range options {
+		op(rt)
+	}
 	return rt
 }
 
@@ -254,13 +268,14 @@ func (rt *RoutingTable) NearestPeers(id ID, count int) []peer.ID {
 		cpl = len(rt.Buckets) - 1
 	}
 
-	pds := peerDistanceSorter{
-		peers:  make([]peerDistance, 0, count+rt.bucketsize),
+	pds := peerDistanceSorterWithLatency{
+		peers:  make([]peerDistanceWithLatency, 0, count+rt.bucketsize),
 		target: id,
 	}
 
 	// Add peers from the target bucket (cpl+1 shared bits).
-	pds.appendPeersFromList(rt.Buckets[cpl].list)
+	//TODO add a flag to discale it
+	pds.appendPeersFromListAndLatency(rt.Buckets[cpl].list, rt.metrics.LatencyEWMA)
 
 	// If we're short, add peers from buckets to the right until we have
 	// enough. All buckets to the right share exactly cpl bits (as opposed
@@ -273,7 +288,7 @@ func (rt *RoutingTable) NearestPeers(id ID, count int) []peer.ID {
 	// However, we're going to do that anyways as it's "good enough"
 
 	for i := cpl + 1; i < len(rt.Buckets) && pds.Len() < count; i++ {
-		pds.appendPeersFromList(rt.Buckets[i].list)
+		pds.appendPeersFromListAndLatency(rt.Buckets[i].list, rt.metrics.LatencyEWMA)
 	}
 
 	// If we're still short, add in buckets that share _fewer_ bits. We can
@@ -284,7 +299,7 @@ func (rt *RoutingTable) NearestPeers(id ID, count int) []peer.ID {
 	// * bucket cpl-2: cpl-2 shared bits.
 	// ...
 	for i := cpl - 1; i >= 0 && pds.Len() < count; i-- {
-		pds.appendPeersFromList(rt.Buckets[i].list)
+		pds.appendPeersFromListAndLatency(rt.Buckets[i].list, rt.metrics.LatencyEWMA)
 	}
 	rt.tabLock.RUnlock()
 
