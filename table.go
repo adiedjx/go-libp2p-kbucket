@@ -145,22 +145,25 @@ func (rt *RoutingTable) ResetCplRefreshedAtForID(id ID, newTime time.Time) {
 // Update adds or moves the given peer to the front of its respective bucket
 func (rt *RoutingTable) Update(p peer.ID) (evicted peer.ID, err error) {
 	peerID := ConvertPeerID(p)
+	latency := rt.metrics.LatencyEWMA(p)
 	cpl := CommonPrefixLen(peerID, rt.local)
-
+	if latency < time.Millisecond {
+		fmt.Println("low latency.....", p.String())
+	}
 	rt.tabLock.Lock()
 	defer rt.tabLock.Unlock()
 	bucketID := cpl
 	if bucketID >= len(rt.Buckets) {
 		bucketID = len(rt.Buckets) - 1
 	}
-	latency := rt.metrics.LatencyEWMA(p)
 
 	bucket := rt.Buckets[bucketID]
 	if bucket.Has(p) {
 
 		//TODO,
 		//in future can check its latency again and move it to its respective position
-		//bucket.PushFrontWithLatency(p, latency)
+		bucket.Remove(p)
+		bucket.PushFrontWithLatency(p, latency)
 		return "", nil
 	}
 
@@ -169,12 +172,12 @@ func (rt *RoutingTable) Update(p peer.ID) (evicted peer.ID, err error) {
 		return "", ErrPeerRejectedHighLatency
 	}
 
-	// We have enough space in the bucket (whether s pawned or grouped).
-	if bucket.list.Len() < rt.bucketsize {
-		bucket.PushFrontWithLatency(p, latency)
-		rt.PeerAdded(p)
-		return "", nil
-	}
+	//// We have enough space in the bucket (whether s pawned or grouped).
+	//if bucket.list.Len() < rt.bucketsize {
+	//	bucket.PushFrontWithLatency(p, latency)
+	//	rt.PeerAdded(p)
+	//	return "", nil
+	//}
 
 	if bucketID == len(rt.Buckets)-1 {
 		// if the bucket is too large and this is the last bucket (i.e. wildcard), unfold it.
@@ -194,7 +197,15 @@ func (rt *RoutingTable) Update(p peer.ID) (evicted peer.ID, err error) {
 		return "", nil
 	}
 
-	return "", ErrPeerRejectedNoCapacity
+	// We have enough space in the bucket (whether s pawned or grouped).
+
+	bucket.PushFrontWithLatency(p, latency)
+	rt.PeerAdded(p)
+	if bucket.list.Len() > rt.bucketsize {
+		removedPeer := bucket.PopBack()
+		rt.PeerRemoved(removedPeer)
+	}
+	return "", nil
 }
 
 // Remove deletes a peer from the routing table. This is to be used
